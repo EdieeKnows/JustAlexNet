@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  pytorch-dev:
+    # Use the specified NGC PyTorch image
+    image: nvcr.io/nvidia/pytorch:25.08-py3
+
+    # To enable GPU access, we need to specify the runtime.
+    # The 'gpus' key is the modern way to do this.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+    # Map local directories to directories inside the container.
+    # Replace the paths on the left with your actual local paths.
+    volumes:
+      # Volume for your Python code and scripts
+      - ~/JustAlexNet:/app/code
+      # Volume for your datasets
+      - ~/datasets:/app/data
+
+    # A long-running command to keep the container alive.
+    # This allows you to attach to it later using 'docker compose exec'.
+    command: sleep infinity
+
