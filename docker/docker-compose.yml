@@ -19,9 +19,12 @@ services:
     # Replace the paths on the left with your actual local paths.
     volumes:
       # Volume for your Python code and scripts
-      - ~/JustAlexNet:/app/code
+      - ../:/app/code
       # Volume for your datasets
-      - ~/datasets:/app/data
+      - /mnt/d/xuyz/datasets:/app/data
+    
+    # Increase /dev/shm to 1 GB
+    shm_size: 1gb
 
     # A long-running command to keep the container alive.
     # This allows you to attach to it later using 'docker compose exec'.
