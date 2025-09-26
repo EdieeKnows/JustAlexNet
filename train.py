@@ -1,9 +1,12 @@
 from pathlib import Path
+import argparse
 
 import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
+
 from alexnet import AlexNet
+from resnet import resnet18
 from dataset_imagenett import train_loader, val_loader
 
 
@@ -82,16 +85,46 @@ def evaluate(dataloader, model, loss_fn, device):
 
     return epoch_loss, epoch_acc
 
+def build_model(name: str, num_classes: int) -> nn.Module:
+    """Factory method to construct a supported classification model."""
+
+    name = name.lower()
+    if name == "alexnet":
+        return AlexNet(num_classes=num_classes)
+    if name in {"resnet", "resnet18"}:
+        return resnet18(num_classes=num_classes)
+
+    raise ValueError(
+        f"Unsupported model '{name}'. Available options: alexnet, resnet18"
+    )
+
+
 if __name__ == "__main__":
-    # ---- 1. Device selection – works on CUDA, MPS (Apple Silicon) or CPU ---- 
+    parser = argparse.ArgumentParser(description="Train image classification models")
+    parser.add_argument(
+        "--model",
+        default="alexnet",
+        help="Model architecture to train (alexnet or resnet18)",
+    )
+    parser.add_argument(
+        "--num-classes",
+        type=int,
+        default=1000,
+        help="Number of output classes",
+    )
+    args = parser.parse_args()
+
+    # ---- 1. Device selection – works on CUDA, MPS (Apple Silicon) or CPU ----
     device = torch.device(
         "cuda" if torch.cuda.is_available() else
         "mps" if torch.backends.mps.is_available() else
         "cpu"
     )
     print(f"Using {device} device")
+    print(f"Selected model: {args.model}")
+
     # Define the model and optimizer
-    model = AlexNet(num_classes=1000).to(device)
+    model = build_model(args.model, args.num_classes).to(device)
     # Initialize the loss function
     loss_fn = nn.CrossEntropyLoss()
     # Initialize the optimizer
