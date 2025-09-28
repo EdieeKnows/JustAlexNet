@@ -23,8 +23,8 @@ services:
       # Volume for your datasets
       - /mnt/d/xuyz/datasets:/app/data
     
-    # Increase /dev/shm to 1 GB
-    shm_size: 1gb
+    # Increase /dev/shm to 8 GB
+    shm_size: 8gb
 
     # A long-running command to keep the container alive.
     # This allows you to attach to it later using 'docker compose exec'.

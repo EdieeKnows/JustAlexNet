@@ -1,5 +1,6 @@
 from pathlib import Path
 import argparse
+import logging
 
 import matplotlib.pyplot as plt
 import torch
@@ -41,7 +42,7 @@ def train_loop(dataloader, model, loss_fn, optimizer, device):
             avg_acc = running_corrects / current_samples
             batch_acc = batch_corrects / len(X)
             lr = optimizer.param_groups[0]["lr"]
-            print(
+            logger.info(
                 "Batch {batch:>4d}: loss={loss:.4f}, acc={acc:.2f}%, "
                 "avg_loss={avg_loss:.4f}, avg_acc={avg_acc:.2f}%, lr={lr:.6f} "
                 "[{current}/{total}]".format(
@@ -100,6 +101,17 @@ def build_model(name: str, num_classes: int) -> nn.Module:
 
 
 if __name__ == "__main__":
+    # Create and configure logger
+    logging.basicConfig(filename="train.log",
+                    format='%(asctime)s %(message)s',
+                    filemode='w')
+    # Creating an object
+    logger = logging.getLogger()
+
+    # Setting the threshold of logger to DEBUG
+    logger.setLevel(logging.DEBUG)
+
+    # Arguments for the script
     parser = argparse.ArgumentParser(description="Train image classification models")
     parser.add_argument(
         "--model",
@@ -120,8 +132,8 @@ if __name__ == "__main__":
         "mps" if torch.backends.mps.is_available() else
         "cpu"
     )
-    print(f"Using {device} device")
-    print(f"Selected model: {args.model}")
+    logger.info(f"Using {device} device")
+    logger.info(f"Selected model: {args.model}")
 
     # Define the model and optimizer
     model = build_model(args.model, args.num_classes).to(device)
@@ -136,7 +148,7 @@ if __name__ == "__main__":
         nesterov=True                # optional
     )
 
-    epochs = 10
+    epochs = 100
 
     history = {"train_loss": [], "train_acc": [], "val_loss": [], "val_acc": []}
     best_val_acc = 0.0
@@ -147,7 +159,7 @@ if __name__ == "__main__":
     latest_model_path = checkpoint_dir / "latest_model.pth"
 
     for t in range(epochs):
-        print(f"Epoch {t + 1}/{epochs}\n-------------------------------")
+        logger.info(f"Epoch {t + 1}/{epochs}\n-------------------------------")
         train_loss, train_acc = train_loop(train_loader, model, loss_fn, optimizer, device)
         val_loss, val_acc = evaluate(val_loader, model, loss_fn, device)
 
@@ -161,11 +173,11 @@ if __name__ == "__main__":
         if val_acc > best_val_acc:
             best_val_acc = val_acc
             torch.save(model.state_dict(), best_model_path)
-            print(f"New best model saved with val_acc={val_acc * 100:.2f}%")
+            logger.info(f"New best model saved with val_acc={val_acc * 100:.2f}%")
         else:
-            print(f"Best val_acc so far: {best_val_acc * 100:.2f}%")
+            logger.info(f"Best val_acc so far: {best_val_acc * 100:.2f}%")
 
-        print(
+        logger.info(
             "Epoch Summary: train_loss={train_loss:.4f}, train_acc={train_acc:.2f}%, "
             "val_loss={val_loss:.4f}, val_acc={val_acc:.2f}%".format(
                 train_loss=train_loss,
@@ -175,7 +187,7 @@ if __name__ == "__main__":
             )
         )
 
-    print("Training complete!")
+    logger.info("Training complete!")
 
     epochs_range = range(1, epochs + 1)
     plt.figure(figsize=(12, 5))
@@ -201,6 +213,6 @@ if __name__ == "__main__":
     plt.savefig(plot_path, dpi=300)
     plt.close()
 
-    print(f"Training metrics plot saved to {plot_path.resolve()}")
+    logger.info(f"Training metrics plot saved to {plot_path.resolve()}")
 
 
