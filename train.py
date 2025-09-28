@@ -11,7 +11,16 @@ from resnet import resnet18
 from dataset_imagenett import train_loader, val_loader
 
 
-def train_loop(dataloader, model, loss_fn, optimizer, device):
+def train_loop(
+    dataloader,
+    model,
+    loss_fn,
+    optimizer,
+    device,
+    *,
+    scaler: "torch.cuda.amp.GradScaler | None" = None,
+    use_autocast: bool = False,
+):
     """Run a training epoch and return aggregated loss and accuracy."""
 
     size = len(dataloader.dataset)
@@ -23,12 +32,19 @@ def train_loop(dataloader, model, loss_fn, optimizer, device):
     for batch, (X, y) in enumerate(dataloader):
         X, y = X.to(device), y.to(device)
 
-        pred = model(X)
-        loss = loss_fn(pred, y)
+        optimizer.zero_grad(set_to_none=True)
 
-        loss.backward()
-        optimizer.step()
-        optimizer.zero_grad()
+        with torch.cuda.amp.autocast(enabled=use_autocast):
+            pred = model(X)
+            loss = loss_fn(pred, y)
+
+        if scaler is not None:
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            loss.backward()
+            optimizer.step()
 
         batch_loss = loss.item()
         batch_corrects = (pred.argmax(1) == y).sum().item()
@@ -63,7 +79,7 @@ def train_loop(dataloader, model, loss_fn, optimizer, device):
     return epoch_loss, epoch_acc
 
 
-def evaluate(dataloader, model, loss_fn, device):
+def evaluate(dataloader, model, loss_fn, device, *, use_autocast: bool = False):
     """Evaluate the model and return loss and accuracy."""
 
     size = len(dataloader.dataset)
@@ -75,8 +91,9 @@ def evaluate(dataloader, model, loss_fn, device):
     with torch.no_grad():
         for X, y in dataloader:
             X, y = X.to(device), y.to(device)
-            pred = model(X)
-            loss = loss_fn(pred, y)
+            with torch.cuda.amp.autocast(enabled=use_autocast):
+                pred = model(X)
+                loss = loss_fn(pred, y)
 
             running_loss += loss.item() * X.size(0)
             running_corrects += (pred.argmax(1) == y).sum().item()
@@ -137,6 +154,44 @@ if __name__ == "__main__":
 
     # Define the model and optimizer
     model = build_model(args.model, args.num_classes).to(device)
+
+    gpu_count = torch.cuda.device_count() if torch.cuda.is_available() else 0
+    use_autocast = False
+    scaler = None
+    if device.type == "cuda":
+        logger.info(f"Detected {gpu_count} CUDA device(s)")
+        device_capabilities = []
+        for idx in range(gpu_count):
+            capability = torch.cuda.get_device_capability(idx)
+            name = torch.cuda.get_device_name(idx)
+            supports_tensor_core = capability[0] >= 7
+            device_capabilities.append(supports_tensor_core)
+            logger.info(
+                "GPU {idx}: {name} (compute capability {major}.{minor}) – Tensor Cores {support}".format(
+                    idx=idx,
+                    name=name,
+                    major=capability[0],
+                    minor=capability[1],
+                    support="enabled" if supports_tensor_core else "not available",
+                )
+            )
+
+        if gpu_count > 1:
+            logger.info("Wrapping model with torch.nn.DataParallel for multi-GPU training")
+            model = nn.DataParallel(model)
+
+        if device_capabilities and all(device_capabilities):
+            use_autocast = True
+            scaler = torch.cuda.amp.GradScaler()
+            logger.info(
+                "All CUDA devices support Tensor Cores – enabling automatic mixed precision"
+            )
+        else:
+            logger.info(
+                "Tensor Cores not detected on all CUDA devices – training will use full precision"
+            )
+    else:
+        logger.info("CUDA not available – running on a single device")
     # Initialize the loss function
     loss_fn = nn.CrossEntropyLoss()
     # Initialize the optimizer
@@ -160,19 +215,39 @@ if __name__ == "__main__":
 
     for t in range(epochs):
         logger.info(f"Epoch {t + 1}/{epochs}\n-------------------------------")
-        train_loss, train_acc = train_loop(train_loader, model, loss_fn, optimizer, device)
-        val_loss, val_acc = evaluate(val_loader, model, loss_fn, device)
+        train_loss, train_acc = train_loop(
+            train_loader,
+            model,
+            loss_fn,
+            optimizer,
+            device,
+            scaler=scaler,
+            use_autocast=use_autocast,
+        )
+        val_loss, val_acc = evaluate(
+            val_loader,
+            model,
+            loss_fn,
+            device,
+            use_autocast=use_autocast,
+        )
 
         history["train_loss"].append(train_loss)
         history["train_acc"].append(train_acc)
         history["val_loss"].append(val_loss)
         history["val_acc"].append(val_acc)
 
-        torch.save(model.state_dict(), latest_model_path)
+        state_dict = (
+            model.module.state_dict()
+            if isinstance(model, nn.DataParallel)
+            else model.state_dict()
+        )
+
+        torch.save(state_dict, latest_model_path)
 
         if val_acc > best_val_acc:
             best_val_acc = val_acc
-            torch.save(model.state_dict(), best_model_path)
+            torch.save(state_dict, best_model_path)
             logger.info(f"New best model saved with val_acc={val_acc * 100:.2f}%")
         else:
             logger.info(f"Best val_acc so far: {best_val_acc * 100:.2f}%")
