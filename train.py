@@ -124,6 +124,24 @@ if __name__ == "__main__":
         default=1000,
         help="Number of output classes",
     )
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=100,
+        help="Maximum number of training epochs",
+    )
+    parser.add_argument(
+        "--early-stop-patience",
+        type=int,
+        default=10,
+        help="Number of epochs with no validation loss improvement before stopping. Use 0 to disable.",
+    )
+    parser.add_argument(
+        "--early-stop-min-delta",
+        type=float,
+        default=0.0,
+        help="Minimum change in validation loss to qualify as an improvement for early stopping.",
+    )
     args = parser.parse_args()
 
     # ---- 1. Device selection – works on CUDA, MPS (Apple Silicon) or CPU ----
@@ -148,71 +166,98 @@ if __name__ == "__main__":
         nesterov=True                # optional
     )
 
-    epochs = 100
-
     history = {"train_loss": [], "train_acc": [], "val_loss": [], "val_acc": []}
     best_val_acc = 0.0
+    best_val_loss = float("inf")
+    epochs_without_improvement = 0
 
     checkpoint_dir = Path("checkpoints")
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     best_model_path = checkpoint_dir / "best_model.pth"
     latest_model_path = checkpoint_dir / "latest_model.pth"
 
-    for t in range(epochs):
-        logger.info(f"Epoch {t + 1}/{epochs}\n-------------------------------")
-        train_loss, train_acc = train_loop(train_loader, model, loss_fn, optimizer, device)
-        val_loss, val_acc = evaluate(val_loader, model, loss_fn, device)
+    def plot_history():
+        epochs_completed = len(history["train_loss"])
+        if epochs_completed == 0:
+            logger.warning("No training epochs completed; skipping plot generation.")
+            return
 
-        history["train_loss"].append(train_loss)
-        history["train_acc"].append(train_acc)
-        history["val_loss"].append(val_loss)
-        history["val_acc"].append(val_acc)
+        epochs_range = range(1, epochs_completed + 1)
+        plt.figure(figsize=(12, 5))
 
-        torch.save(model.state_dict(), latest_model_path)
+        plt.subplot(1, 2, 1)
+        plt.plot(epochs_range, history["train_loss"], label="Train Loss")
+        plt.plot(epochs_range, history["val_loss"], label="Val Loss")
+        plt.xlabel("Epoch")
+        plt.ylabel("Loss")
+        plt.title("Loss over Epochs")
+        plt.legend()
 
-        if val_acc > best_val_acc:
-            best_val_acc = val_acc
-            torch.save(model.state_dict(), best_model_path)
-            logger.info(f"New best model saved with val_acc={val_acc * 100:.2f}%")
-        else:
-            logger.info(f"Best val_acc so far: {best_val_acc * 100:.2f}%")
+        plt.subplot(1, 2, 2)
+        plt.plot(epochs_range, [acc * 100 for acc in history["train_acc"]], label="Train Acc")
+        plt.plot(epochs_range, [acc * 100 for acc in history["val_acc"]], label="Val Acc")
+        plt.xlabel("Epoch")
+        plt.ylabel("Accuracy (%)")
+        plt.title("Accuracy over Epochs")
+        plt.legend()
 
-        logger.info(
-            "Epoch Summary: train_loss={train_loss:.4f}, train_acc={train_acc:.2f}%, "
-            "val_loss={val_loss:.4f}, val_acc={val_acc:.2f}%".format(
-                train_loss=train_loss,
-                train_acc=train_acc * 100,
-                val_loss=val_loss,
-                val_acc=val_acc * 100,
+        plot_path = Path("training_metrics.png")
+        plt.tight_layout()
+        plt.savefig(plot_path, dpi=300)
+        plt.close()
+
+        logger.info(f"Training metrics plot saved to {plot_path.resolve()}")
+
+    try:
+        for t in range(args.epochs):
+            logger.info(f"Epoch {t + 1}/{args.epochs}\n-------------------------------")
+            train_loss, train_acc = train_loop(train_loader, model, loss_fn, optimizer, device)
+            val_loss, val_acc = evaluate(val_loader, model, loss_fn, device)
+
+            history["train_loss"].append(train_loss)
+            history["train_acc"].append(train_acc)
+            history["val_loss"].append(val_loss)
+            history["val_acc"].append(val_acc)
+
+            torch.save(model.state_dict(), latest_model_path)
+
+            if val_acc > best_val_acc:
+                best_val_acc = val_acc
+                torch.save(model.state_dict(), best_model_path)
+                logger.info(f"New best model saved with val_acc={val_acc * 100:.2f}%")
+            else:
+                logger.info(f"Best val_acc so far: {best_val_acc * 100:.2f}%")
+
+            logger.info(
+                "Epoch Summary: train_loss={train_loss:.4f}, train_acc={train_acc:.2f}%, "
+                "val_loss={val_loss:.4f}, val_acc={val_acc:.2f}%".format(
+                    train_loss=train_loss,
+                    train_acc=train_acc * 100,
+                    val_loss=val_loss,
+                    val_acc=val_acc * 100,
+                )
             )
-        )
 
-    logger.info("Training complete!")
+            if val_loss < best_val_loss - args.early_stop_min_delta:
+                best_val_loss = val_loss
+                epochs_without_improvement = 0
+            else:
+                epochs_without_improvement += 1
+                if (
+                    args.early_stop_patience > 0
+                    and epochs_without_improvement >= args.early_stop_patience
+                ):
+                    logger.info(
+                        "Early stopping triggered after %d epochs without improvement.",
+                        epochs_without_improvement,
+                    )
+                    break
 
-    epochs_range = range(1, epochs + 1)
-    plt.figure(figsize=(12, 5))
-
-    plt.subplot(1, 2, 1)
-    plt.plot(epochs_range, history["train_loss"], label="Train Loss")
-    plt.plot(epochs_range, history["val_loss"], label="Val Loss")
-    plt.xlabel("Epoch")
-    plt.ylabel("Loss")
-    plt.title("Loss over Epochs")
-    plt.legend()
-
-    plt.subplot(1, 2, 2)
-    plt.plot(epochs_range, [acc * 100 for acc in history["train_acc"]], label="Train Acc")
-    plt.plot(epochs_range, [acc * 100 for acc in history["val_acc"]], label="Val Acc")
-    plt.xlabel("Epoch")
-    plt.ylabel("Accuracy (%)")
-    plt.title("Accuracy over Epochs")
-    plt.legend()
-
-    plot_path = Path("training_metrics.png")
-    plt.tight_layout()
-    plt.savefig(plot_path, dpi=300)
-    plt.close()
-
-    logger.info(f"Training metrics plot saved to {plot_path.resolve()}")
+        else:
+            logger.info("Training complete!")
+    except KeyboardInterrupt:
+        logger.info("Training interrupted by user. Finalizing before exit...")
+    finally:
+        plot_history()
 
 
