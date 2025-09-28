@@ -8,6 +8,7 @@ import torch.nn as nn
 
 from alexnet import AlexNet
 from resnet import resnet18
+from densenet import densenet201
 from dataset_imagenett import train_loader, val_loader
 
 
@@ -94,9 +95,11 @@ def build_model(name: str, num_classes: int) -> nn.Module:
         return AlexNet(num_classes=num_classes)
     if name in {"resnet", "resnet18"}:
         return resnet18(num_classes=num_classes)
+    if name in {"densenet", "densenet201"}:
+        return densenet201(num_classes=num_classes)
 
     raise ValueError(
-        f"Unsupported model '{name}'. Available options: alexnet, resnet18"
+        f"Unsupported model '{name}'. Available options: alexnet, resnet18, densenet201"
     )
 
 
@@ -116,7 +119,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model",
         default="alexnet",
-        help="Model architecture to train (alexnet or resnet18)",
+        help="Model architecture to train (alexnet, resnet18 or densenet201)",
     )
     parser.add_argument(
         "--num-classes",
