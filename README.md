@@ -7,6 +7,7 @@
 | 路径 | 说明 |
 | --- | --- |
 | `alexnet.py` | 定义 AlexNet 网络结构，并提供随机张量的快速自测入口。 |
+| `densenet.py` | 实现 DenseNet 主干，并提供 `densenet201` 快速构造函数。 |
 | `dataset_imagenett.py` | 构建 ImageNet / ImageNet-T 目录的 `ImageFolder` 数据集，包含数据增强、训练/验证划分和 `DataLoader`。 |
 | `train.py` | 主训练脚本：封装训练与验证流程、记录准确率/损失、自动保存检查点并导出训练曲线。 |
 | `transfer_learning.py` | 迁移学习示例：加载预训练 ResNet18，仅训练分类头，内置加权采样与早停逻辑。 |
@@ -46,8 +47,11 @@ pip install torch torchvision matplotlib
 运行方式：
 
 ```bash
-python train.py
+python train.py --model densenet201
 ```
+
+
+可根据需要修改 epoch 数、优化器参数或添加学习率调度器。`--model` 参数目前支持 `alexnet`、`resnet18` 与 `densenet201`。
 
 若希望显式指定 GPU，可以使用 `CUDA_VISIBLE_DEVICES` 控制；对于需要跨节点/进程训练的场景，可参考 `torch.distributed.run` 启动方式：
 
