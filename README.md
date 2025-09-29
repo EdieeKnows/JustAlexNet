@@ -10,7 +10,7 @@
 | `densenet.py` | 实现 DenseNet 主干，并提供 `densenet201` 快速构造函数。 |
 | `dataset_imagenett.py` | 构建 ImageNet / ImageNet-T 目录的 `ImageFolder` 数据集，包含数据增强、训练/验证划分和 `DataLoader`。 |
 | `train.py` | 主训练脚本：封装训练与验证流程、记录 Top-1/Top-5 指标、自动保存检查点并导出训练曲线。 |
-| `transfer_learning.py` | 迁移学习示例：加载预训练 ResNet18，仅训练分类头，内置加权采样与早停逻辑。 |
+| `transfer_learning.py` | 迁移学习示例：加载预训练 ResNet18/ResNet152，仅训练分类头，内置加权采样与早停逻辑。 |
 | `inference.py` | 推理脚本：加载检查点，对单张图像输出 Top-K 预测，并支持自定义类别映射。 |
 | `docker/docker-compose.yml` | 基于 NVIDIA PyTorch 镜像的 Docker Compose 环境，挂载代码与数据目录。 |
 | `test.png` | 示例图片，可用于快速验证推理脚本。 |
@@ -85,7 +85,7 @@ python inference.py test.png --checkpoint checkpoints/best_model.pth --model res
 
 该脚本适合样本量极小的分类任务：
 
-- 使用预训练的 ResNet18 作为骨干网络，仅训练分类头。
+- 使用预训练的 ResNet18 或 ResNet152 作为骨干网络，仅训练分类头。
 - 根据类频自动构建加权采样器，缓解类别不平衡。
 - 支持命令行配置批大小、学习率、图像尺寸等超参数。
 - 内置早停机制，并在 `artifacts/` 目录保存最佳/最终模型。
@@ -94,8 +94,10 @@ python inference.py test.png --checkpoint checkpoints/best_model.pth --model res
 
 ```bash
 python transfer_learning.py /path/to/dataset \
-    --batch-size 8 --epochs 25 --lr 1e-3 --workers 4
+    --batch-size 8 --epochs 25 --lr 1e-3 --workers 4 --backbone resnet152
 ```
+
+不加 `--backbone` 参数时默认使用 `resnet18`。
 
 数据目录需符合 `ImageFolder` 结构。
 
