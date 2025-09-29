@@ -37,6 +37,7 @@ class TrainingConfig:
     output_dir: Path = Path("artifacts")
     image_size: int = 224
     seed: int = 42
+    backbone: str = "resnet18"
 
 
 def set_seed(seed: int) -> None:
@@ -131,8 +132,14 @@ def build_dataloaders(config: TrainingConfig) -> Tuple[DataLoader, DataLoader]:
     return train_loader, val_loader
 
 
-def build_model(num_classes: int) -> nn.Module:
-    model = models.resnet18(weights=models.ResNet18_Weights.IMAGENET1K_V1)
+def build_model(num_classes: int, backbone: str = "resnet18") -> nn.Module:
+    backbone = backbone.lower()
+    if backbone == "resnet152":
+        model = models.resnet152(weights=models.ResNet152_Weights.IMAGENET1K_V1)
+    elif backbone in {"resnet", "resnet18"}:
+        model = models.resnet18(weights=models.ResNet18_Weights.IMAGENET1K_V1)
+    else:
+        raise ValueError("Unsupported backbone. Choose between 'resnet18' and 'resnet152'.")
 
     for param in model.parameters():
         param.requires_grad = False
@@ -202,7 +209,7 @@ def run_training(config: TrainingConfig) -> None:
     train_loader, val_loader = build_dataloaders(config)
     num_classes = len(train_loader.dataset.dataset.classes)  # type: ignore[attr-defined]
 
-    model = build_model(num_classes)
+    model = build_model(num_classes, config.backbone)
     model.to(device)
 
     criterion = nn.CrossEntropyLoss()
@@ -244,6 +251,13 @@ def parse_args(args: Iterable[str] | None = None) -> TrainingConfig:
     parser.add_argument("--image-size", type=int, default=224, help="Input image size")
     parser.add_argument("--workers", type=int, default=4, help="Number of dataloader workers")
     parser.add_argument("--output", type=Path, default=Path("artifacts"), help="Where to store checkpoints")
+    parser.add_argument(
+        "--backbone",
+        type=str,
+        default="resnet18",
+        choices=["resnet18", "resnet152"],
+        help="Which pre-trained backbone to fine-tune",
+    )
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
 
     parsed = parser.parse_args(args)
@@ -259,6 +273,7 @@ def parse_args(args: Iterable[str] | None = None) -> TrainingConfig:
         num_workers=parsed.workers,
         output_dir=parsed.output,
         seed=parsed.seed,
+        backbone=parsed.backbone,
     )
 
 
