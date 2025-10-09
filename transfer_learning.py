@@ -21,6 +21,17 @@ from torch import nn
 from torch.utils.data import DataLoader, Dataset, Subset, WeightedRandomSampler
 from torchvision import datasets, models, transforms
 
+import logging
+import datetime
+
+logger = logging.getLogger("trainer")
+
+
+def setup_logger(log_path: Path) -> logging.Logger:
+    logging.basicConfig(filename=log_path, format="%(asctime)s %(message)s", filemode="w")
+    configured_logger = logging.getLogger("trainer")
+    configured_logger.setLevel(logging.DEBUG)
+    return configured_logger
 
 @dataclass
 class TrainingConfig:
@@ -146,21 +157,30 @@ def build_model(num_classes: int, backbone: str = "resnet18") -> nn.Module:
 
     in_features = model.fc.in_features
     model.fc = nn.Sequential(
-        nn.Dropout(p=0.5),
+        nn.Dropout(p=0.8),
         nn.Linear(in_features, in_features // 2),
         nn.ReLU(inplace=True),
+        nn.BatchNorm1d(in_features // 2),
         nn.Dropout(p=0.2),
-        nn.Linear(in_features // 2, num_classes),
+        nn.Linear(in_features // 2, in_features // 4),
+        nn.ReLU(inplace=True),
+        nn.BatchNorm1d(in_features // 4),
+        nn.Linear(in_features // 4, num_classes),
     )
+
+    logger.info(f"Using backbone: {backbone}")
+    logger.info(f"fc in features: {in_features}")
+    logger.info(f"full connect classifyer: {model.fc}")
 
     return model
 
 
 def train_one_epoch(model: nn.Module, dataloader: DataLoader, criterion, optimizer, device: torch.device) -> float:
     model.train()
+    size = len(dataloader.dataset)
     running_loss = 0.0
 
-    for inputs, targets in dataloader:
+    for batch, (inputs, targets) in enumerate(dataloader, start=1):
         inputs = inputs.to(device)
         targets = targets.to(device)
 
@@ -170,7 +190,27 @@ def train_one_epoch(model: nn.Module, dataloader: DataLoader, criterion, optimiz
         loss.backward()
         optimizer.step()
 
+        batch_loss = loss.item()
         running_loss += loss.item() * inputs.size(0)
+
+        if batch % 5 == 0:
+            current_samples = batch * dataloader.batch_size + len(inputs)
+            avg_loss = running_loss / current_samples
+            lr = optimizer.param_groups[0]["lr"]
+            logger.info(
+                (
+                    "Batch {batch:>4d}: loss={loss:.4f}, "
+                    "avg_loss={avg_loss:.4f}, "
+                    "lr={lr:.6f} [{current}/{total}]"
+                ).format(
+                    batch=batch,
+                    loss=batch_loss,
+                    avg_loss=avg_loss,
+                    lr=lr,
+                    current=current_samples,
+                    total=size,
+                )
+            )
 
     return running_loss / len(dataloader.dataset)
 
@@ -205,12 +245,25 @@ def save_checkpoint(model: nn.Module, path: Path) -> None:
 def run_training(config: TrainingConfig) -> None:
     set_seed(config.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    logger.info(f"Using device {device}")
 
-    train_loader, val_loader = build_dataloaders(config)
-    num_classes = len(train_loader.dataset.dataset.classes)  # type: ignore[attr-defined]
+    if 'FGVCAircraft' in str(config.data_root):
+        train_tf, eval_tf = build_transforms(config.image_size)
+        training_data = datasets.FGVCAircraft(root=config.data_root,split='train', transform=train_tf, download=True)
+        val_data = datasets.FGVCAircraft(root=config.data_root, split='val', transform=eval_tf, download=True)
+        train_loader = DataLoader(training_data, batch_size=config.batch_size, shuffle=False)
+        val_loader = DataLoader(val_data, batch_size=config.batch_size, shuffle=False)
+        num_classes = 100
+    else:
+        train_loader, val_loader = build_dataloaders(config)
+        num_classes = len(train_loader.dataset.dataset.classes)  # type: ignore[attr-defined]
+
+    logger.info(f"Data loaded successfully")
 
     model = build_model(num_classes, config.backbone)
     model.to(device)
+
+    logger.info(f"Model built successfully")
 
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=config.lr, weight_decay=config.weight_decay)
@@ -219,10 +272,12 @@ def run_training(config: TrainingConfig) -> None:
     patience_counter = 0
 
     for epoch in range(config.max_epochs):
+        logger.info(f"\n===== Epoch {epoch + 1}/{config.max_epochs} =====")
+
         train_loss = train_one_epoch(model, train_loader, criterion, optimizer, device)
         val_loss, val_acc = evaluate(model, val_loader, criterion, device)
 
-        print(
+        logger.info(
             f"Epoch {epoch + 1}/{config.max_epochs} - "
             f"train_loss: {train_loss:.4f} val_loss: {val_loss:.4f} val_acc: {val_acc:.3f}"
         )
@@ -234,7 +289,7 @@ def run_training(config: TrainingConfig) -> None:
         else:
             patience_counter += 1
             if patience_counter >= config.patience:
-                print("Early stopping triggered.")
+                logger.info("Early stopping triggered.")
                 break
 
     save_checkpoint(model, config.output_dir / "last_model.pt")
@@ -276,8 +331,33 @@ def parse_args(args: Iterable[str] | None = None) -> TrainingConfig:
         backbone=parsed.backbone,
     )
 
+def generate_log_filename():
+    """
+    Generates a log file name with the current timestamp.
+    
+    The format is 'cnn_training_log_YYYYMMDD_HHMMSS.txt'.
+    """
+    # 1. Get the current date and time
+    now = datetime.datetime.now()
+    
+    # 2. Format the time into a string suitable for a filename
+    #    %Y: Year with century (e.g., 2025)
+    #    %m: Month as a zero-padded decimal number (e.g., 09)
+    #    %d: Day of the month as a zero-padded decimal (e.g., 29)
+    #    %H: Hour (24-hour clock) as a zero-padded decimal (e.g., 14)
+    #    %M: Minute as a zero-padded decimal (e.g., 33)
+    #    %S: Second as a zero-padded decimal (e.g., 35)
+    timestamp_str = now.strftime("%Y%m%d_%H%M%S")
+    
+    # 3. Construct the full filename
+    filename = f"transfer_training_{timestamp_str}.log"
+    
+    return filename
+
 
 def main() -> None:
+    log_file_name = generate_log_filename()
+    logger = setup_logger(Path(log_file_name))
     config = parse_args()
     run_training(config)
 
