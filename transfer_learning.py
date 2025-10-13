@@ -26,7 +26,7 @@ import datetime
 
 import os
 # pre-trained model path
-os.environ['TORCH_HOME'] = '/pre-trained-models'
+os.environ['TORCH_HOME'] = '/app/data/pre-trained-models'
 
 logger = logging.getLogger("trainer")
 
