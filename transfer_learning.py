@@ -24,6 +24,10 @@ from torchvision import datasets, models, transforms
 import logging
 import datetime
 
+import os
+# pre-trained model path
+os.environ['TORCH_HOME'] = '/pre-trained-models'
+
 logger = logging.getLogger("trainer")
 
 
